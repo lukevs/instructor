@@ -428,7 +428,7 @@ class InstructorOpenAICompletions(openai.resources.chat.Completions):
             max_retries=max_retries,
             args=args,
             kwargs=new_kwargs,
-            mode=Mode.FUNCTIONS,
+            mode=self.mode,
         )
 
         return response
