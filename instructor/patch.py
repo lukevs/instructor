@@ -19,6 +19,7 @@ from typing import (
 )
 
 from openai import AsyncOpenAI, OpenAI
+import openai
 from openai.types.chat import (
     ChatCompletion,
     ChatCompletionMessage,
@@ -397,11 +398,78 @@ class InstructorChatCompletionCreate(Protocol, Generic[T_ParamSpec, T_Model]):
     ) -> T_Model:
         ...
 
+class InstructorOpenAICompletions(openai.resources.ChatCompletions):
+    def __init__(self, openai_completions: openai.resources.Completions, mode: Mode):
+        self.openai_completions = openai_completions
+        self.mode = mode
+
+    def __getattr__(self, name):
+        if name == "create":
+            return self.create
+
+        return getattr(self.openai_completions, name)
+
+    def create(
+        self,
+        response_model: Type[T_Model] = None,
+        validation_context: dict = None,
+        max_retries: int = 1,
+        *args: T_ParamSpec.args,
+        **kwargs: T_ParamSpec.kwargs,
+    ) -> T_Model:
+        response_model, new_kwargs = handle_response_model(
+            response_model=response_model, mode=self.mode, **kwargs
+        )
+
+        response = retry_sync(
+            func=self.openai_completions.create,
+            response_model=response_model,
+            validation_context=validation_context,
+            max_retries=max_retries,
+            args=args,
+            kwargs=new_kwargs,
+            mode=Mode.FUNCTIONS,
+        )
+
+        return response
+
+class InstructorOpenAIChat(openai.resources.Chat):
+    def __init__(self, openai_chat: openai.resources.Chat, mode: Mode):
+        self.openai_chat = openai_chat
+        self.instructor_completions = InstructorOpenAICompletions(openai_chat.completions, mode)
+
+    def __getattr__(self, name):
+        if name == "completions":
+            return self.instructor_completions
+
+        return getattr(self.openai_chat, name)
+
+    @property
+    def completions(self):
+        return self.instructor_completions
+
+
+class InstructorOpenAI(OpenAI):
+    def __init__(self, openai_client: OpenAI, mode=Mode.FUNCTIONS):
+        self.openai_client = openai_client
+        self.instructor_chat = InstructorOpenAIChat(openai_client.chat, mode)
+
+    def __getattr__(self, name):
+        if name == "chat":
+            return self.instructor_chat
+
+        return getattr(self.openai_client, name)
+
+    @property
+    def chat(self):
+        return self.instructor_chat
+
+
 @overload
 def patch(
     client: OpenAI,
     mode: Mode = Mode.FUNCTIONS,
-) -> OpenAI:
+) -> InstructorOpenAI:
     ...
 
 @overload
@@ -422,7 +490,7 @@ def patch(
     client: Union[OpenAI, AsyncOpenAI] = None,
     create: Callable[T_ParamSpec, T_Retval] = None,
     mode: Mode = Mode.FUNCTIONS,
-) -> Union[OpenAI, AsyncOpenAI]:
+) -> Union[InstructorOpenAI, AsyncOpenAI]:
     """
     Patch the `client.chat.completions.create` method
 
@@ -493,8 +561,9 @@ def patch(
     new_create.__doc__ = OVERRIDE_DOCS
 
     if client is not None:
-        client.chat.completions.create = new_create
-        return client
+        return InstructorOpenAI(client, mode=mode)
+        # client.chat.completions.create = new_create
+        # return client
     else:
         return new_create
 
