@@ -398,8 +398,8 @@ class InstructorChatCompletionCreate(Protocol, Generic[T_ParamSpec, T_Model]):
     ) -> T_Model:
         ...
 
-class InstructorOpenAICompletions(openai.resources.ChatCompletions):
-    def __init__(self, openai_completions: openai.resources.ChatCompletions, mode: Mode):
+class InstructorOpenAICompletions(openai.resources.chat.Completions):
+    def __init__(self, openai_completions: openai.resources.chat.Completions, mode: Mode):
         self.openai_completions = openai_completions
         self.mode = mode
 
