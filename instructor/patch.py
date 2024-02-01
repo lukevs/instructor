@@ -433,10 +433,61 @@ class InstructorOpenAICompletions(openai.resources.chat.Completions):
 
         return response
 
+
+class InstructorOpenAIAsyncCompletions(openai.resources.chat.AsyncCompletions):
+    def __init__(self, openai_completions: openai.resources.chat.AsyncCompletions, mode: Mode):
+        self.openai_completions = openai_completions
+        self.mode = mode
+
+    def __getattr__(self, name):
+        if name == "create":
+            return self.create
+
+        return getattr(self.openai_completions, name)
+
+    async def create(
+        self,
+        response_model: Type[T_Model] = None,
+        validation_context: dict = None,
+        max_retries: int = 1,
+        *args: T_ParamSpec.args,
+        **kwargs: T_ParamSpec.kwargs,
+    ) -> T_Model:
+        response_model, new_kwargs = handle_response_model(
+            response_model=response_model, mode=self.mode, **kwargs
+        )
+
+        response = await retry_async(
+            func=self.openai_completions.create,
+            response_model=response_model,
+            validation_context=validation_context,
+            max_retries=max_retries,
+            args=args,
+            kwargs=new_kwargs,
+            mode=self.mode,
+        )
+        return response
+
 class InstructorOpenAIChat(openai.resources.Chat):
     def __init__(self, openai_chat: openai.resources.Chat, mode: Mode):
         self.openai_chat = openai_chat
         self.instructor_completions = InstructorOpenAICompletions(openai_chat.completions, mode)
+
+    def __getattr__(self, name):
+        if name == "completions":
+            return self.instructor_completions
+
+        return getattr(self.openai_chat, name)
+
+    @property
+    def completions(self):
+        return self.instructor_completions
+
+
+class InstructorOpenAIAsyncChat(openai.resources.AsyncChat):
+    def __init__(self, openai_chat: openai.resources.AsyncChat, mode: Mode):
+        self.openai_chat = openai_chat
+        self.instructor_completions = InstructorOpenAIAsyncCompletions(openai_chat.completions, mode)
 
     def __getattr__(self, name):
         if name == "completions":
@@ -465,6 +516,22 @@ class InstructorOpenAI(OpenAI):
         return self.instructor_chat
 
 
+class InstructorAsyncOpenAI(AsyncOpenAI):
+    def __init__(self, openai_client: AsyncOpenAI, mode=Mode.FUNCTIONS):
+        self.openai_client = openai_client
+        self.instructor_chat = InstructorOpenAIAsyncChat(openai_client.chat, mode)
+
+    def __getattr__(self, name):
+        if name == "chat":
+            return self.instructor_chat
+
+        return getattr(self.openai_client, name)
+
+    @property
+    def chat(self):
+        return self.instructor_chat
+
+
 @overload
 def patch(
     client: OpenAI,
@@ -476,21 +543,14 @@ def patch(
 def patch(
     client: AsyncOpenAI,
     mode: Mode = Mode.FUNCTIONS,
-) -> AsyncOpenAI:
+) -> InstructorAsyncOpenAI:
     ...
 
-@overload
-def patch(
-    create: Callable[T_ParamSpec, T_Retval],
-    mode: Mode = Mode.FUNCTIONS,
-) -> InstructorChatCompletionCreate[T_ParamSpec, T_Model]:
-    ...
 
 def patch(
-    client: Union[OpenAI, AsyncOpenAI] = None,
-    create: Callable[T_ParamSpec, T_Retval] = None,
+    client: Union[OpenAI, AsyncOpenAI],
     mode: Mode = Mode.FUNCTIONS,
-) -> Union[InstructorOpenAI, AsyncOpenAI]:
+) -> Union[InstructorOpenAI, InstructorAsyncOpenAI]:
     """
     Patch the `client.chat.completions.create` method
 
@@ -504,68 +564,10 @@ def patch(
 
     logger.debug(f"Patching `client.chat.completions.create` with {mode=}")
 
-    if create is not None:
-        func = create
-    elif client is not None:
-        func = client.chat.completions.create
+    if isinstance(client, AsyncOpenAI):
+        return InstructorAsyncOpenAI(client, mode=mode)
     else:
-        raise ValueError("Either client or create must be provided")
-
-    func_is_async = is_async(func)
-
-    @wraps(func)
-    async def new_create_async(
-        response_model: Type[T_Model] = None,
-        validation_context: dict = None,
-        max_retries: int = 1,
-        *args: T_ParamSpec.args,
-        **kwargs: T_ParamSpec.kwargs,
-    ) -> T_Model:
-        response_model, new_kwargs = handle_response_model(
-            response_model=response_model, mode=mode, **kwargs
-        )
-        response = await retry_async(
-            func=func,
-            response_model=response_model,
-            validation_context=validation_context,
-            max_retries=max_retries,
-            args=args,
-            kwargs=new_kwargs,
-            mode=mode,
-        )  # type: ignore
-        return response
-
-    @wraps(func)
-    def new_create_sync(
-        response_model: Type[T_Model] = None,
-        validation_context: dict = None,
-        max_retries: int = 1,
-        *args: T_ParamSpec.args,
-        **kwargs: T_ParamSpec.kwargs,
-    ) -> T_Model:
-        response_model, new_kwargs = handle_response_model(
-            response_model=response_model, mode=mode, **kwargs
-        )
-        response = retry_sync(
-            func=func,
-            response_model=response_model,
-            validation_context=validation_context,
-            max_retries=max_retries,
-            args=args,
-            kwargs=new_kwargs,
-            mode=mode,
-        )
-        return response
-
-    new_create = new_create_async if func_is_async else new_create_sync
-    new_create.__doc__ = OVERRIDE_DOCS
-
-    if client is not None:
         return InstructorOpenAI(client, mode=mode)
-        # client.chat.completions.create = new_create
-        # return client
-    else:
-        return new_create
 
 
 def apatch(client: AsyncOpenAI, mode: Mode = Mode.FUNCTIONS):
