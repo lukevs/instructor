@@ -2,7 +2,6 @@ import inspect
 import json
 import logging
 from collections.abc import Iterable
-from functools import wraps
 from json import JSONDecodeError
 from typing import (
     Callable,
@@ -18,8 +17,8 @@ from typing import (
     overload,
 )
 
+from openai import resources
 from openai import AsyncOpenAI, OpenAI
-import openai
 from openai.types.chat import (
     ChatCompletion,
     ChatCompletionMessage,
@@ -398,16 +397,14 @@ class InstructorChatCompletionCreate(Protocol, Generic[T_ParamSpec, T_Model]):
     ) -> T_Model:
         ...
 
-class InstructorOpenAICompletions(openai.resources.chat.Completions):
-    def __init__(self, openai_completions: openai.resources.chat.Completions, mode: Mode):
-        self.openai_completions = openai_completions
+
+class InstructorOpenAICompletions(resources.chat.Completions):
+    mode: Mode
+
+    def __init__(self, openai_completions: resources.chat.Completions, mode: Mode):
+        self.__dict__.update(openai_completions.__dict__)
+        self.openai_create = openai_completions.create
         self.mode = mode
-
-    def __getattr__(self, name):
-        if name == "create":
-            return self.create
-
-        return getattr(self.openai_completions, name)
 
     def create(
         self,
@@ -422,7 +419,7 @@ class InstructorOpenAICompletions(openai.resources.chat.Completions):
         )
 
         response = retry_sync(
-            func=self.openai_completions.create,
+            func=self.openai_create,
             response_model=response_model,
             validation_context=validation_context,
             max_retries=max_retries,
@@ -434,16 +431,12 @@ class InstructorOpenAICompletions(openai.resources.chat.Completions):
         return response
 
 
-class InstructorOpenAIAsyncCompletions(openai.resources.chat.AsyncCompletions):
-    def __init__(self, openai_completions: openai.resources.chat.AsyncCompletions, mode: Mode):
-        self.openai_completions = openai_completions
+class InstructorOpenAIAsyncCompletions(resources.chat.AsyncCompletions):
+    mode: Mode
+
+    def __init__(self, openai_completions: resources.chat.AsyncCompletions, mode: Mode):
+        self.__dict__.update(openai_completions.__dict__)
         self.mode = mode
-
-    def __getattr__(self, name):
-        if name == "create":
-            return self.create
-
-        return getattr(self.openai_completions, name)
 
     async def create(
         self,
@@ -466,70 +459,40 @@ class InstructorOpenAIAsyncCompletions(openai.resources.chat.AsyncCompletions):
             kwargs=new_kwargs,
             mode=self.mode,
         )
+
         return response
 
-class InstructorOpenAIChat(openai.resources.Chat):
-    def __init__(self, openai_chat: openai.resources.Chat, mode: Mode):
-        self.openai_chat = openai_chat
-        self.instructor_completions = InstructorOpenAICompletions(openai_chat.completions, mode)
 
-    def __getattr__(self, name):
-        if name == "completions":
-            return self.instructor_completions
+class InstructorOpenAIChat(resources.Chat):
+    completions: InstructorOpenAICompletions
 
-        return getattr(self.openai_chat, name)
-
-    @property
-    def completions(self):
-        return self.instructor_completions
+    def __init__(self, openai_chat: resources.Chat, mode: Mode):
+        self.__dict__.update(openai_chat.__dict__)
+        self.completions = InstructorOpenAICompletions(openai_chat.completions, mode)
 
 
-class InstructorOpenAIAsyncChat(openai.resources.AsyncChat):
-    def __init__(self, openai_chat: openai.resources.AsyncChat, mode: Mode):
-        self.openai_chat = openai_chat
-        self.instructor_completions = InstructorOpenAIAsyncCompletions(openai_chat.completions, mode)
+class InstructorOpenAIAsyncChat(resources.AsyncChat):
+    completions: InstructorOpenAIAsyncCompletions
 
-    def __getattr__(self, name):
-        if name == "completions":
-            return self.instructor_completions
-
-        return getattr(self.openai_chat, name)
-
-    @property
-    def completions(self):
-        return self.instructor_completions
+    def __init__(self, openai_chat: resources.AsyncChat, mode: Mode):
+        self.__dict__.update(openai_chat.__dict__)
+        self.completions = InstructorOpenAIAsyncCompletions(openai_chat.completions, mode)
 
 
 class InstructorOpenAI(OpenAI):
+    chat: InstructorOpenAIChat
+
     def __init__(self, openai_client: OpenAI, mode=Mode.FUNCTIONS):
-        self.openai_client = openai_client
-        self.instructor_chat = InstructorOpenAIChat(openai_client.chat, mode)
-
-    def __getattr__(self, name):
-        if name == "chat":
-            return self.instructor_chat
-
-        return getattr(self.openai_client, name)
-
-    @property
-    def chat(self):
-        return self.instructor_chat
+        self.__dict__.update(openai_client.__dict__)
+        self.chat = InstructorOpenAIChat(openai_client.chat, mode)
 
 
 class InstructorAsyncOpenAI(AsyncOpenAI):
+    chat: InstructorOpenAIAsyncChat
+
     def __init__(self, openai_client: AsyncOpenAI, mode=Mode.FUNCTIONS):
-        self.openai_client = openai_client
-        self.instructor_chat = InstructorOpenAIAsyncChat(openai_client.chat, mode)
-
-    def __getattr__(self, name):
-        if name == "chat":
-            return self.instructor_chat
-
-        return getattr(self.openai_client, name)
-
-    @property
-    def chat(self):
-        return self.instructor_chat
+        self.__dict__.update(openai_client.__dict__)
+        self.chat = InstructorOpenAIAsyncChat(openai_client.chat, mode)
 
 
 @overload
