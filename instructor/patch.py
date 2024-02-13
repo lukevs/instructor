@@ -8,7 +8,6 @@ from typing import (
     Generic,
     Optional,
     ParamSpec,
-    Protocol,
     Type,
     TypeVar,
     Union,
@@ -153,16 +152,44 @@ def handle_response_model(
             raise ValueError(f"Invalid patch mode: {mode}")
     return response_model, new_kwargs
 
+T_ProcessResponse = TypeVar("T_ProcessResponse")
+T_ProcessResponseModel = TypeVar("T_ProcessResponseModel", bound=BaseModel)
 
+@overload
 def process_response(
-    response: T,
+    response: T_ProcessResponse,
     *,
-    response_model: Type[T_Model],
+    response_model: Type[T_ProcessResponseModel],
     stream: bool,
     validation_context: dict = None,
     strict=None,
     mode: Mode = Mode.FUNCTIONS,
-) -> Union[T_Model, T]:
+) -> T_ProcessResponseModel:
+    ...
+
+
+@overload
+def process_response(
+    response: T_ProcessResponse,
+    *,
+    response_model: None,
+    stream: bool,
+    validation_context: dict = None,
+    strict=None,
+    mode: Mode = Mode.FUNCTIONS,
+) -> T_ProcessResponse:
+    ...
+
+
+def process_response(
+    response: T_ProcessResponse,
+    *,
+    response_model: Type[T_ProcessResponseModel] | None,
+    stream: bool,
+    validation_context: dict = None,
+    strict=None,
+    mode: Mode = Mode.FUNCTIONS,
+) -> T_ProcessResponse | T_ProcessResponseModel:
     """Processes a OpenAI response with the response model, if available.
 
     Args:
@@ -192,6 +219,7 @@ def process_response(
             if is_model_multitask:
                 return model.tasks
         return model
+
     return response
 
 
@@ -243,7 +271,7 @@ async def retry_async(
     max_retries,
     strict: Optional[bool] = None,
     mode: Mode = Mode.FUNCTIONS,
-) -> T:
+):
     retries = 0
     total_usage = CompletionUsage(completion_tokens=0, prompt_tokens=0, total_tokens=0)
     while retries <= max_retries:
@@ -295,24 +323,57 @@ async def retry_async(
             if retries > max_retries:
                 raise e
 
+T_RetryModel = TypeVar("T_RetryModel")
+T_RetryFuncReturn = TypeVar("T_RetryFuncReturn")
 
+
+@overload
 def retry_sync(
-    func: Callable[T_ParamSpec, T_Retval],
-    response_model: Type[T],
+    func: Callable[..., T_RetryFuncReturn],
+    response_model: Type[T_RetryModel],
     validation_context: dict,
     args,
     kwargs,
     max_retries: int = 1,
     strict: Optional[bool] = None,
     mode: Mode = Mode.FUNCTIONS,
-):
+) -> T_RetryModel:
+    ...
+
+
+@overload
+def retry_sync(
+    func: Callable[..., T_RetryFuncReturn],
+    response_model: None,
+    validation_context: dict,
+    args,
+    kwargs,
+    max_retries: int = 1,
+    strict: Optional[bool] = None,
+    mode: Mode = Mode.FUNCTIONS,
+) -> T_RetryFuncReturn:
+    ...
+
+
+def retry_sync(
+    func: Callable[..., T_RetryFuncReturn],
+    response_model: Type[T_RetryModel] | None,
+    validation_context: dict,
+    args,
+    kwargs,
+    max_retries: int = 1,
+    strict: Optional[bool] = None,
+    mode: Mode = Mode.FUNCTIONS,
+) -> T_RetryFuncReturn | T_RetryModel:
     retries = 0
     total_usage = CompletionUsage(completion_tokens=0, prompt_tokens=0, total_tokens=0)
+
     while retries <= max_retries:
         # Excepts ValidationError, and JSONDecodeError
         try:
             response = func(*args, **kwargs)
             stream = kwargs.get("stream", False)
+
             if isinstance(response, ChatCompletion) and response.usage is not None:
                 total_usage.completion_tokens += response.usage.completion_tokens or 0
                 total_usage.prompt_tokens += response.usage.prompt_tokens or 0
@@ -386,113 +447,119 @@ Parameters:
     validation_context (dict): The validation context to use for validating the response (default: None)
 """
 
-class InstructorChatCompletionCreate(Protocol, Generic[T_ParamSpec, T_Model]):
-    def __call__(
-        self,
+
+T_CreateParamSpec = ParamSpec("T_CreateParamSpec")
+T_CreateModel = TypeVar("T_CreateModel", bound=BaseModel)
+
+def wrap_sync_create(
+    create: Callable[T_CreateParamSpec, ChatCompletion],
+    mode: Mode,
+) -> Callable[T_CreateParamSpec, T_CreateModel]:
+    def create_sync(
         response_model: Type[T_Model] = None,
         validation_context: dict = None,
         max_retries: int = 1,
-        *args: T_ParamSpec.args,
-        **kwargs: T_ParamSpec.kwargs,
-    ) -> T_Model:
-        ...
-
-
-class InstructorOpenAICompletions(resources.chat.Completions):
-    mode: Mode
-
-    def __init__(self, openai_completions: resources.chat.Completions, mode: Mode):
-        self.__dict__.update(openai_completions.__dict__)
-        self.openai_create = openai_completions.create
-        self.mode = mode
-
-    def create(
-        self,
-        response_model: Type[T_Model] = None,
-        validation_context: dict = None,
-        max_retries: int = 1,
-        *args: T_ParamSpec.args,
-        **kwargs: T_ParamSpec.kwargs,
-    ) -> T_Model:
+        *args: T_CreateParamSpec.args,
+        **kwargs: T_CreateParamSpec.kwargs,
+    ) -> T_CreateModel:
         response_model, new_kwargs = handle_response_model(
-            response_model=response_model, mode=self.mode, **kwargs
+            response_model=response_model, mode=mode, **kwargs
         )
 
         response = retry_sync(
-            func=self.openai_create,
+            func=create,
             response_model=response_model,
             validation_context=validation_context,
             max_retries=max_retries,
             args=args,
             kwargs=new_kwargs,
-            mode=self.mode,
+            mode=mode,
         )
 
         return response
 
+    return create_sync
 
-class InstructorOpenAIAsyncCompletions(resources.chat.AsyncCompletions):
-    mode: Mode
 
-    def __init__(self, openai_completions: resources.chat.AsyncCompletions, mode: Mode):
+T_CreateParamSpec = ParamSpec("T_CreateParamSpec")
+
+class InstructorOpenAICompletions(resources.chat.Completions, Generic[T_CreateParamSpec]):
+    T_ResponseModel = TypeVar("T_ResponseModel", bound=BaseModel)
+
+    def __init__(self, openai_completions: resources.chat.Completions, _create: Callable[T_CreateParamSpec, ChatCompletion], mode=Mode.FUNCTIONS) -> None:
         self.__dict__.update(openai_completions.__dict__)
-        self.mode = mode
 
-    async def create(
+    @overload
+    def create(
         self,
-        response_model: Type[T_Model] = None,
-        validation_context: dict = None,
+        response_model: Type[T_ResponseModel],
+        validation_context: dict | None = None,
         max_retries: int = 1,
-        *args: T_ParamSpec.args,
-        **kwargs: T_ParamSpec.kwargs,
-    ) -> T_Model:
+        *args: T_CreateParamSpec.args,
+        **kwargs: T_CreateParamSpec.kwargs,
+    ) -> T_ResponseModel:
+        ...
+
+    @overload
+    def create(
+        self,
+        response_model: None,
+        validation_context: dict | None = None,
+        max_retries: int = 1,
+        *args: T_CreateParamSpec.args,
+        **kwargs: T_CreateParamSpec.kwargs,
+    ) -> ChatCompletion:
+        ...
+
+    def create(
+        self,
+        response_model: Type[T_ResponseModel] | None = None,
+        validation_context: dict | None = None,
+        max_retries: int = 1,
+        *args: T_CreateParamSpec.args,
+        **kwargs: T_CreateParamSpec.kwargs,
+    ) -> T_ResponseModel | ChatCompletion:
         response_model, new_kwargs = handle_response_model(
-            response_model=response_model, mode=self.mode, **kwargs
+            response_model=response_model, mode=self._mode, **kwargs
         )
 
-        response = await retry_async(
+        response = retry_sync(
             func=self.openai_completions.create,
             response_model=response_model,
             validation_context=validation_context,
             max_retries=max_retries,
             args=args,
             kwargs=new_kwargs,
-            mode=self.mode,
+            mode=self._mode,
         )
 
         return response
 
 
-class InstructorOpenAIChat(resources.Chat):
-    completions: InstructorOpenAICompletions
+T_ChatCreateParams = ParamSpec("T_ChatCreateParams") 
 
+class InstructorOpenAIChat(resources.Chat, Generic[T_ChatCreateParams]):
     def __init__(self, openai_chat: resources.Chat, mode: Mode):
         self.__dict__.update(openai_chat.__dict__)
-        self.completions = InstructorOpenAICompletions(openai_chat.completions, mode)
+        self._openai_chat: resources.Chat = openai_chat
+        self._mode = mode
+
+    @property
+    def completions(self):
+        return InstructorOpenAICompletions[T_ChatCreateParams](self._openai_chat.completions, self._openai_chat.create, self._mode)
 
 
-class InstructorOpenAIAsyncChat(resources.AsyncChat):
-    completions: InstructorOpenAIAsyncCompletions
+T_OpenAICreateParams = ParamSpec("T_OpenAICreateParams") 
 
-    def __init__(self, openai_chat: resources.AsyncChat, mode: Mode):
-        self.__dict__.update(openai_chat.__dict__)
-        self.completions = InstructorOpenAIAsyncCompletions(openai_chat.completions, mode)
-
-
-class InstructorOpenAI(OpenAI):
-    chat: InstructorOpenAIChat
-
-    def __init__(self, openai_client: OpenAI, mode=Mode.FUNCTIONS):
+class InstructorOpenAI(OpenAI, Generic[T_OpenAICreateParams]):
+    def __init__(self, openai_client: OpenAI, mode=Mode.FUNCTIONS) -> None:
         self.__dict__.update(openai_client.__dict__)
-        self.chat = InstructorOpenAIChat(openai_client.chat, mode)
+        self._openai_client: OpenAI = openai_client
+        self._mode = mode
 
-
-class InstructorAsyncOpenAI(AsyncOpenAI):
-    chat: InstructorOpenAIAsyncChat
-
-    def __init__(self, openai_client: AsyncOpenAI, mode=Mode.FUNCTIONS):
-        self.__dict__.update(openai_client.__dict__)
-        self.chat = InstructorOpenAIAsyncChat(openai_client.chat, mode)
+    @property
+    def chat(self):
+        return InstructorOpenAIChat[T_OpenAICreateParams](self._openai_client, self._mode)
 
 
 @overload
@@ -502,18 +569,19 @@ def patch(
 ) -> InstructorOpenAI:
     ...
 
+
 @overload
 def patch(
     client: AsyncOpenAI,
     mode: Mode = Mode.FUNCTIONS,
-) -> InstructorAsyncOpenAI:
+) -> AsyncOpenAI:
     ...
 
 
 def patch(
     client: Union[OpenAI, AsyncOpenAI],
     mode: Mode = Mode.FUNCTIONS,
-) -> Union[InstructorOpenAI, InstructorAsyncOpenAI]:
+) -> Union[InstructorOpenAI, AsyncOpenAI]:
     """
     Patch the `client.chat.completions.create` method
 
@@ -528,9 +596,11 @@ def patch(
     logger.debug(f"Patching `client.chat.completions.create` with {mode=}")
 
     if isinstance(client, AsyncOpenAI):
-        return InstructorAsyncOpenAI(client, mode=mode)
+        # return InstructorAsyncOpenAI(client, mode=mode)
+        # TODO
+        return client
     else:
-        return InstructorOpenAI(client, mode=mode)
+        return InstructorOpenAI(client, create=client.completions.create, mode=mode)
 
 
 def apatch(client: AsyncOpenAI, mode: Mode = Mode.FUNCTIONS):
