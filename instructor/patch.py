@@ -24,14 +24,14 @@ def patch(
 def patch(
     client: AsyncOpenAI,
     mode: Mode = Mode.FUNCTIONS,
-) -> AsyncOpenAI:
+) -> InstructorAsyncOpenAI:
     ...
 
 
 def patch(
     client: Union[OpenAI, AsyncOpenAI],
     mode: Mode = Mode.FUNCTIONS,
-) -> Union[InstructorOpenAI, AsyncOpenAI]:
+) -> Union[InstructorOpenAI, InstructorAsyncOpenAI]:
     """
     Patch the `client.chat.completions.create` method
 
