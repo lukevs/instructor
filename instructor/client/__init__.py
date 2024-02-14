@@ -1,3 +1,3 @@
-from .client import InstructorOpenAI
+from .client import InstructorOpenAI, InstructorAsyncOpenAI
 
-__all__ = ["InstructorOpenAI"]
+__all__ = ["InstructorOpenAI", "InstructorAsyncOpenAI"]

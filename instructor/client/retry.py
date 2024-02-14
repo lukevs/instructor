@@ -206,3 +206,142 @@ def dump_message(message: ChatCompletionMessage) -> ChatCompletionMessageParam:
         ret["content"] += json.dumps(message.model_dump()["function_call"], indent=2)
 
     return ret
+
+
+T_AsyncRetryModel = TypeVar("T_AsyncRetryModel", bound=BaseModel)
+T_AsyncRetryFuncReturn = TypeVar("T_AsyncRetryFuncReturn")
+
+
+async def retry_async(
+    func: Callable[..., T_AsyncRetryFuncReturn],
+    response_model: Type[T_AsyncRetryModel],
+    validation_context,
+    args,
+    kwargs,
+    max_retries,
+    strict: Optional[bool] = None,
+    mode: Mode = Mode.FUNCTIONS,
+):
+    retries = 0
+    total_usage = CompletionUsage(completion_tokens=0, prompt_tokens=0, total_tokens=0)
+    while retries <= max_retries:
+        try:
+            response: ChatCompletion = await func(*args, **kwargs)
+            stream = kwargs.get("stream", False)
+            if isinstance(response, ChatCompletion) and response.usage is not None:
+                total_usage.completion_tokens += response.usage.completion_tokens or 0
+                total_usage.prompt_tokens += response.usage.prompt_tokens or 0
+                total_usage.total_tokens += response.usage.total_tokens or 0
+                response.usage = (
+                    total_usage  # Replace each response usage with the total usage
+                )
+            return await process_response_async(
+                response,
+                response_model=response_model,
+                stream=stream,
+                validation_context=validation_context,
+                strict=strict,
+                mode=mode,
+            )
+        except (ValidationError, JSONDecodeError) as e:
+            logger.exception(f"Retrying, exception: {e}")
+            logger.debug(f"Error response: {response}")
+            kwargs["messages"].append(dump_message(response.choices[0].message))  # type: ignore
+            if mode == Mode.TOOLS:
+                kwargs["messages"].append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": response.choices[0].message.tool_calls[0].id,
+                        "name": response.choices[0].message.tool_calls[0].function.name,
+                        "content": "failure",
+                    }
+                )
+            kwargs["messages"].append(
+                {
+                    "role": "user",
+                    "content": f"Recall the function correctly, fix the errors, exceptions found\n{e}",
+                }
+            )
+            if mode == Mode.MD_JSON:
+                kwargs["messages"].append(
+                    {
+                        "role": "assistant",
+                        "content": "```json",
+                    },
+                )
+            retries += 1
+            if retries > max_retries:
+                raise e
+
+
+T_AsyncProcessResponse = TypeVar("T_AsyncProcessResponse")
+T_AsyncProcessResponseModel = TypeVar("T_AsyncProcessResponseModel", bound=BaseModel)
+
+
+@overload
+async def process_response_async(
+    response: T_ProcessResponse,
+    *,
+    response_model: Type[T_ProcessResponseModel],
+    stream: bool,
+    validation_context: dict,
+    strict=None,
+    mode: Mode = Mode.FUNCTIONS,
+) -> T_ProcessResponseModel:
+    ...
+
+
+@overload
+def process_response_async(
+    response: T_AsyncProcessResponse,
+    *,
+    response_model: None,
+    stream: bool = False,
+    validation_context: dict = None,
+    strict: Optional[bool] = None,
+    mode: Mode = Mode.FUNCTIONS,
+) -> T_AsyncProcessResponse:
+    ...
+
+async def process_response_async(
+    response: T_AsyncProcessResponse,
+    *,
+    response_model: Type[T_AsyncProcessResponseModel] | None,
+    stream: bool = False,
+    validation_context: dict = None,
+    strict: Optional[bool] = None,
+    mode: Mode = Mode.FUNCTIONS,
+) -> T_AsyncProcessResponse | T_AsyncProcessResponseModel:
+    """Processes a OpenAI response with the response model, if available.
+    It can use `validation_context` and `strict` to validate the response
+    via the pydantic model
+
+    Args:
+        response (ChatCompletion): The response from OpenAI's API
+        response_model (BaseModel): The response model to use for parsing the response
+        stream (bool): Whether the response is a stream
+        validation_context (dict, optional): The validation context to use for validating the response. Defaults to None.
+        strict (bool, optional): Whether to use strict json parsing. Defaults to None.
+    """
+
+    if response_model is not None:
+        is_model_multitask = issubclass(response_model, MultiTaskBase)
+        is_model_partial = issubclass(response_model, PartialBase)
+
+        model = await response_model.from_response_async(
+            response,
+            validation_context=validation_context,
+            strict=strict,
+            mode=mode,
+            stream_multitask=stream and is_model_multitask,
+            stream_partial=stream and is_model_partial,
+        )
+
+        if not stream:
+            model._raw_response = response
+            if is_model_multitask:
+                return model.tasks
+
+        return model
+
+    return response
