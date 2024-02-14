@@ -61,9 +61,6 @@ def retry_sync(
     retries = 0
     total_usage = CompletionUsage(completion_tokens=0, prompt_tokens=0, total_tokens=0)
 
-    print(args)
-    print(kwargs)
-
     while retries <= max_retries:
         # Excepts ValidationError, and JSONDecodeError
         try:
