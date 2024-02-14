@@ -35,6 +35,8 @@ class Mode(enum.Enum):
 
 
 class OpenAISchema(BaseModel):  
+    T_OpenAISchemaInstance  = TypeVar("T_OpenAISchemaInstance", bound="OpenAISchema")
+
     @classmethod
     @property
     def openai_schema(cls) -> Dict[str, Any]:
@@ -80,12 +82,12 @@ class OpenAISchema(BaseModel):
 
     @classmethod
     def from_response(
-        cls,
+        cls: Type[T_OpenAISchemaInstance],
         completion: T,
         validation_context: Optional[Dict[str, Any]] = None,
         strict: Optional[bool] = None,
         mode: Mode = Mode.TOOLS,
-    ) -> 'OpenAISchema':
+    ) -> T_OpenAISchemaInstance:
         """Execute the function from the response of an openai chat completion
 
         Parameters:
@@ -137,7 +139,9 @@ class OpenAISchema(BaseModel):
             raise ValueError(f"Invalid patch mode: {mode}")
 
 
-def openai_schema(cls: Type[BaseModel]) -> OpenAISchema:
+T_OpenAISchemaModel = TypeVar("T_OpenAISchemaModel", bound=BaseModel)
+
+def openai_schema(cls: Type[T_OpenAISchemaModel]) -> T_OpenAISchemaModel:
     if not issubclass(cls, BaseModel):
         raise TypeError("Class must be a subclass of pydantic.BaseModel")
 
