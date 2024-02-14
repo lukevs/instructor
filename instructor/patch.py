@@ -29,7 +29,7 @@ def patch(
 
 
 def patch(
-    client: Union[OpenAI, AsyncOpenAI],
+    client: Union[OpenAI, AsyncOpenAI] = None,
     mode: Mode = Mode.FUNCTIONS,
 ) -> Union[InstructorOpenAI, InstructorAsyncOpenAI]:
     """

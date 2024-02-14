@@ -1,59 +1,77 @@
-# Running a Local Ollama Model
+# Structured Outputs with Ollama
 
-Here are some instructions on using Ollamo and Litellm.
+Open-source LLMS are gaining popularity, and the release of Ollama's OpenAI compatibility later it has made it possible to obtain structured outputs using JSON schema.
 
-## Instructions
+By the end of this blog post, you will learn how to effectively utilize instructor with ollama. But before we proceed, let's first explore the concept of patching.
 
-1. Install Ollama by visiting the website [https://ollama.ai/download](https://ollama.ai/download) and selecting the appropriate operating system.
+## Patching
 
-2. Once installed, open the Ollama app, which should be running in your taskbar.
+Instructor's patch enhances a openai api it with the following features:
 
-3. Open the terminal and download a model. For example, to download the llama2 model, run the command:
+- `response_model` in `create` calls that returns a pydantic model
+- `max_retries` in `create` calls that retries the call if it fails by using a backoff strategy
 
-```bash
-ollama run llama2
+!!! note "Learn More"
+
+    To learn more, please refer to the [docs](../index.md). To understand the benefits of using Pydantic with Instructor, visit the tips and tricks section of the [why use Pydantic](../why.md) page.
+
+## Ollama
+
+Start by downloading [Ollama](https://ollama.ai/download), and then pull a model such as Llama 2 or Mistral.
+
+!!! tip "Make sure you update your `ollama` to the latest version!"
+
 ```
-
-4. In your terminal, start your virtual environment and install the 'litellm[proxy]' package using poetry you can run the command:
-
-```bash
-pip install 'litellm[proxy]'
+ollama pull llama2
 ```
-
-Then you should be able to patch using the wrap completion API.
-Since it's just going to use regular prompting and not... Function Calling. You'll need to have a lot more instructions in the system message to ask it to output JSON.
 
 ```python
-from litellm import completion, provider_list
-from pydantic import BaseModel
+from openai import OpenAI
+from pydantic import BaseModel, Field
+from typing import List
 
 import instructor
-from instructor.patch import wrap_chatcompletion
-
-completion = wrap_chatcompletion(completion, mode=instructor.Mode.MD_JSON)
 
 
-class UserExtract(BaseModel):
+class Character(BaseModel):
     name: str
     age: int
+    fact: List[str] = Field(..., description="A list of facts about the character")
 
 
-user = completion(
-    model="ollama/llama2",
-    response_model=UserExtract,
-    messages=[
-        {
-            "role": "system",
-            "content": "You are a JSON extractor. Please extract the following JSON, No Talk.",
-        },
-        {
-            "role": "user",
-            "content": "Extract `My name is Jason and I am 25 years old`",
-        },
-    ],
+# enables `response_model` in create call
+client = instructor.patch(
+    OpenAI(
+        base_url="http://localhost:11434/v1",
+        api_key="ollama",  # required, but unused
+    ),
+    mode=instructor.Mode.JSON,
 )
 
-assert isinstance(user, UserExtract), "Should be instance of UserExtract"
-assert user.name.lower() == "jason"
-assert user.age == 25
+resp = client.chat.completions.create(
+    model="llama2",
+    messages=[
+        {
+            "role": "user",
+            "content": "Tell me about the Harry Potter",
+        }
+    ],
+    response_model=Character,
+)
+print(resp.model_dump_json(indent=2))
+"""
+{
+  "name": "Harry James Potter",
+  "age": 37,
+  "fact": [
+    "He is the chosen one.",
+    "He has a lightning-shaped scar on his forehead.",
+    "He is the son of James and Lily Potter.",
+    "He attended Hogwarts School of Witchcraft and Wizardry.",
+    "He is a skilled wizard and sorcerer.",
+    "He fought against Lord Voldemort and his followers.",
+    "He has a pet owl named Snowy."
+  ]
+}
+"""
 ```
