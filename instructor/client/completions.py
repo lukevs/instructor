@@ -21,7 +21,7 @@ from openai.types.chat import (
 )
 from pydantic import BaseModel
 
-from instructor.client.models import handle_response_model
+from instructor.client.response import handle_response_model
 from instructor.client.retry import retry_async, retry_sync
 from instructor.function_calls import Mode
 
