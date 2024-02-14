@@ -326,7 +326,6 @@ async def retry_async(
 T_RetryModel = TypeVar("T_RetryModel")
 T_RetryFuncReturn = TypeVar("T_RetryFuncReturn")
 
-
 @overload
 def retry_sync(
     func: Callable[..., T_RetryFuncReturn],
@@ -485,31 +484,35 @@ T_CreateParamSpec = ParamSpec("T_CreateParamSpec")
 
 class InstructorOpenAICompletions(resources.chat.Completions, Generic[T_CreateParamSpec]):
     T_ResponseModel = TypeVar("T_ResponseModel", bound=BaseModel)
+    _create: Callable[T_CreateParamSpec, ChatCompletion]
 
-    def __init__(self, openai_completions: resources.chat.Completions, _create: Callable[T_CreateParamSpec, ChatCompletion], mode=Mode.FUNCTIONS) -> None:
+    def __init__(self, openai_completions: resources.chat.Completions, create: Callable[T_CreateParamSpec, ChatCompletion], mode=Mode.FUNCTIONS) -> None:
         self.__dict__.update(openai_completions.__dict__)
+        self._openai_completions: resources.chat.Completions = openai_completions
+        self._create = create
+        self._mode = mode
 
-    @overload
-    def create(
-        self,
-        response_model: Type[T_ResponseModel],
-        validation_context: dict | None = None,
-        max_retries: int = 1,
-        *args: T_CreateParamSpec.args,
-        **kwargs: T_CreateParamSpec.kwargs,
-    ) -> T_ResponseModel:
-        ...
+    # @overload
+    # def create(
+    #     self,
+    #     response_model: Type[T_ResponseModel],
+    #     validation_context: dict | None = None,
+    #     max_retries: int = 1,
+    #     *args: T_CreateParamSpec.args,
+    #     **kwargs: T_CreateParamSpec.kwargs,
+    # ) -> T_ResponseModel:
+    #     ...
 
-    @overload
-    def create(
-        self,
-        response_model: None,
-        validation_context: dict | None = None,
-        max_retries: int = 1,
-        *args: T_CreateParamSpec.args,
-        **kwargs: T_CreateParamSpec.kwargs,
-    ) -> ChatCompletion:
-        ...
+    # @overload
+    # def create(
+    #     self,
+    #     response_model: None,
+    #     validation_context: dict | None = None,
+    #     max_retries: int = 1,
+    #     *args: T_CreateParamSpec.args,
+    #     **kwargs: T_CreateParamSpec.kwargs,
+    # ) -> ChatCompletion:
+    #     ...
 
     def create(
         self,
@@ -524,10 +527,10 @@ class InstructorOpenAICompletions(resources.chat.Completions, Generic[T_CreatePa
         )
 
         response = retry_sync(
-            func=self.openai_completions.create,
+            func=self._create,
             response_model=response_model,
-            validation_context=validation_context,
-            max_retries=max_retries,
+            # validation_context=validation_context,
+            # max_retries=max_retries,
             args=args,
             kwargs=new_kwargs,
             mode=self._mode,
@@ -536,7 +539,7 @@ class InstructorOpenAICompletions(resources.chat.Completions, Generic[T_CreatePa
         return response
 
 
-T_ChatCreateParams = ParamSpec("T_ChatCreateParams") 
+T_ChatCreateParams = ParamSpec("T_ChatCreateParams")
 
 class InstructorOpenAIChat(resources.Chat, Generic[T_ChatCreateParams]):
     def __init__(self, openai_chat: resources.Chat, mode: Mode):
