@@ -10,9 +10,7 @@ T_ResponseModel = TypeVar("T_ResponseModel", bound=BaseModel)
 
 
 def handle_response_model(
-    response_model: T_ResponseModel,
-    mode: Mode = Mode.TOOLS,
-    **kwargs
+    response_model: T_ResponseModel, mode: Mode = Mode.TOOLS, **kwargs
 ) -> Tuple[Type[OpenAISchema], dict]:
     """Prepare the response model type hint, and returns the response_model
     along with the new modified kwargs needed to be able to use the response_model

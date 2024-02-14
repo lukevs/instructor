@@ -20,6 +20,7 @@ logger = logging.getLogger("instructor")
 T_RetryModel = TypeVar("T_RetryModel", bound=BaseModel)
 T_RetryFuncReturn = TypeVar("T_RetryFuncReturn")
 
+
 @overload
 def retry_sync(
     func: Callable[..., T_RetryFuncReturn],
@@ -112,10 +113,11 @@ def retry_sync(
             if retries > max_retries:
                 logger.warning(f"Max retries reached, exception: {e}")
                 raise e
-            
+
 
 T_ProcessResponse = TypeVar("T_ProcessResponse")
 T_ProcessResponseModel = TypeVar("T_ProcessResponseModel", bound=BaseModel)
+
 
 @overload
 def process_response(

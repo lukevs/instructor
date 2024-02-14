@@ -9,4 +9,6 @@ class InstructorOpenAIChat(Chat):
 
     def __init__(self, openai_chat: Chat, mode: Mode):
         self.__dict__.update(openai_chat.__dict__)
-        self.completions = InstructorOpenAIChatCompletions(openai_chat.completions, mode)
+        self.completions = InstructorOpenAIChatCompletions(
+            openai_chat.completions, mode
+        )
