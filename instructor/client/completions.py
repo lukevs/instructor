@@ -395,7 +395,12 @@ class InstructorAsyncOpenAIChatCompletions(AsyncCompletions):
         validation_context: dict | None = None,
         max_retries: int = 1,
         **kwargs,
-    ) -> ChatCompletion | AsyncStream[ChatCompletionChunk] | T_CompletionResponseModel | Any:
+    ) -> (
+        ChatCompletion
+        | AsyncStream[ChatCompletionChunk]
+        | T_CompletionResponseModel
+        | Any
+    ):
         # args = [
         #     messages,
         #     model,

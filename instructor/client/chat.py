@@ -1,5 +1,8 @@
 from openai.resources import Chat, AsyncChat
-from instructor.client.completions import InstructorAsyncOpenAIChatCompletions, InstructorOpenAIChatCompletions
+from instructor.client.completions import (
+    InstructorAsyncOpenAIChatCompletions,
+    InstructorOpenAIChatCompletions,
+)
 
 from instructor.function_calls import Mode
 
