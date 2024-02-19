@@ -8,7 +8,9 @@ from .dsl import (
     openai_moderation,
 )
 from .function_calls import OpenAISchema, openai_schema, Mode
-from .patch import apatch, patch, handle_parallel_model, handle_response_model
+from .patch import apatch, patch
+from .dsl.parallel import handle_parallel_model
+from .client.response import handle_response_model
 
 __all__ = [
     "OpenAISchema",

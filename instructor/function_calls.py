@@ -35,8 +35,6 @@ class Mode(enum.Enum):
 
 
 class OpenAISchema(BaseModel):  
-    T_OpenAISchemaInstance  = TypeVar("T_OpenAISchemaInstance", bound="OpenAISchema")
-
     @classmethod
     @property
     def openai_schema(cls) -> Dict[str, Any]:
@@ -82,12 +80,12 @@ class OpenAISchema(BaseModel):
 
     @classmethod
     def from_response(
-        cls: Type[T_OpenAISchemaInstance],
+        cls,
         completion: T,
         validation_context: Optional[Dict[str, Any]] = None,
         strict: Optional[bool] = None,
         mode: Mode = Mode.TOOLS,
-    ) -> T_OpenAISchemaInstance:
+    ) -> "OpenAISchema":
         """Execute the function from the response of an openai chat completion
 
         Parameters:
